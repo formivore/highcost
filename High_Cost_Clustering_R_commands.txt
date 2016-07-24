@@ -1,0 +1,457 @@
+//=================================   Function Definitions   =======================================================================================================================================================================================================================================
+rangeStandardize<-function(x) { (x - min(x))/(max(x) - min(x)) } 
+
+permute<-function(X,permX) {
+    #Relabels X by the permutation permX.
+    #permX is a reordering of the unique values of X w.r.t. the sorted order.
+    permX[match(X,sort(permX))]
+}
+optimalMatching <- function(toRelabel_X, labels_Y, f_toMax){
+    #######   Tries all permutations to find the match of X to Y labels maximizing the objective function f_toMax  #######
+    # toRelabel_X and Y are vectors of labels/indices
+    # len(Y) > 8 (9!=362,880) not recommended!!
+    # Returns toRelabel_X relabelled for best match.
+    require(combinat)
+    permXs<-permn(unique(toRelabel_X))
+    bestMatch <- permXs[[which.max(lapply(permXs, function(permX) f_toMax(permute(toRelabel_X,permX), labels_Y)))]]
+    permute(toRelabel_X,bestMatch)
+}
+
+myClustering <- function(dfToClust,dfUntransformed,clustK,summaryStats=TRUE) {
+    #######   Runs Wards + K-mediods clustering   #######
+    dfStandardized <-data.frame(apply(dfToClust,2,rangeStandardize))
+    dfAgn <- agnes(dfStandardized, metric = "euclidean", method="ward", stand = FALSE)
+    hcdist<-as.matrix(daisy(dfStandardized))
+    wardClust <- cutree(dfAgn, k = clustK)
+    distMatrix<-as.matrix(daisy(dfStandardized)) 
+    initialMedoids<-sapply(1:clustK,function(c) minClustDist(wardClust==c,distMatrix))
+    dfPAM<-pam( dfStandardized, k=clustK, medoids=initialMedoids)
+    dfPCA<-princomp(dfStandardized)
+    if(summaryStats) {print(sapply(1:clustK,function(k) summary(dfUntransformed[dfPAM$clustering==k,varsOfInterest])[3,]))}
+    data.frame(wards=optimalMatching(cutree(dfAgn, k = clustK), dfPAM$clustering, function(x,y) sum(x==y)), pam=dfPAM$clustering)
+}
+
+myHist <- function(df,rows,cols){
+    #######   plots a grid of histograms  #######
+    par(mfrow=c(2,5))
+    for(i in cols){
+        hist(df[rows,i],nclass=50)
+        title(main=names(df)[i], line = -2)
+    }
+    par(mfrow=c(1,1))
+}
+
+clustDist<-function(i,clust,cDist) sum(sapply(which(clust),function(j) cDist[i,j]))
+minClustDist <- function(clust,cDist) {
+    #######   Calculates min-distortion medoids from clust for input into pam  #######
+    clustDists<-sapply(which(clust),function(i) clustDist(i,clust,cDist))
+    which(clust)[which.min(clustDists)]
+}
+
+myHeatmap <- function(df, clustmethod='ward', col_breaks=col_breaks) {
+    #######   Nice heatmap using clustering from agnes   #######
+    require(gplots)
+    require(cluster)
+    myClustFun <- function(d) agnes(d, diss=TRUE, method=clustmethod, metric = "euclidean", stand = FALSE) #'Now make a heatmap of dataset'
+    my_palette <- colorRampPalette(c("red", "yellow", "green"))(n = 299)
+    heatmap.2(t(df), hclustfun=myClustFun, col=my_palette, breaks=col_breaks, trace='none', scale='row', lwid=c(1,10), lhei=c(3,4),margin=c(2,14), cexRow=2.0)
+}
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   First Exploratory Analysis: 7/16/2014   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+highcost<-read.csv('F:\\High_cost_REDCAP\\HighCostUtilization_Import_ip_op_utiliz.csv')
+head(highcost)
+cor(highcost[,-c(1,2,5)])
+heatmap(cor(highcost[,-c(1,2,5)]),symm=TRUE)
+hist(log(highcost$total_inpatient_days+1),nclass=50)
+highcost$avgLOS<- ifelse(highcost$total_admissions > 0, highcost$total_inpatient_days / highcost$total_admissions, 0) 
+
+pairs(~log(total_admissions+1) + log(total_inpatient_days+1) + log(total_pcp_visits+1) + log(total_specialist_visits+1) 
+    + log(total_ancillary_visits+1) + log(total_ed_visits+1) + log(cost+1) +log(avgLOS+1), main="Simple Scatterplot Matrix",data=highcost)
+
+
+par(mfrow=c(2,4))
+for(i in c(3,4,6,7,8,9,10,11)){
+    hist(highcost[,i],nclass=50)
+    title(main=names(highcost)[i], line = -2)
+}
+ 
+par(mfrow=c(2,4))
+for(i in c(3,4,6,7,8,9,10,11)){
+    hist(log(highcost[,i]+1),nclass=50)
+    title(main=names(highcost)[i], line = -2)
+}
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   First Try at Clustering: 8/5/2014   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+//=================================   Read in High Cost data and transform   =======================================================================================================================================================================================================================================
+require(XLConnect)
+require(ggplot2)
+require(cluster)
+wb = loadWorkbook('F:\\Clustering\\Cluster Analysis Data points.xlsx')
+highcost<-readWorksheet(wb, sheet = 2,endRow=1488)
+head(highcost)
+tail(highcost)
+
+//#######   log transorm and range-standardize   #######
+logtransformed<-data.frame(
+    logCost=log(highcost$Cost),
+    logIPDays=log(highcost$Total.Inpatient.Days + 1),
+    logHospitalAdmissions=log(highcost$Total.Admissions + 1),
+    logICUDays=log(highcost$ICU.Days + 1),
+    pcpVisits=highcost$Total.PCP.visits,
+    specialistVists=highcost$Total.Specialist.Visits,
+    ancillaryVists=highcost$Total.Ancillary.Visits,
+    logEDVists=log(highcost$Total.ED.visits + 1),
+    logORProcedures=log(highcost$ip_sgy + 1))
+hcclust<-data.frame(apply(logtransformed,2,rangeStandardize))
+plot(hcclust$logHospitalAdmissions, hcclust$logIPDays)
+    
+//=================================   Exploratory Analysis   =======================================================================================================================================================================================================================================
+//#######   Look at the data for clustering   #######
+sapply(hcclust, function(x) {sum(as.numeric(is.na(x))) }) #'Check for missing data'
+heatmap(cor(hcclust),symm=TRUE)
+cor(hcclust)
+
+//#######   looking at high correlation of log-transformed admissions and IP days   #######
+summary(factor(highcost$Total.Admissions))
+plot(hcclust$logHospitalAdmissions, hcclust$logIPDays)
+qplot(logHospitalAdmissions, logIPDays, data=hcclust, geom=c("point", "jitter"))
+qplot(factor(logHospitalAdmissions), logIPDays, data=hcclust, geom=c("boxplot", "jitter"))
+qplot(logORProcedures, Total.Inpatient.Days, data=highcost, geom=c("boxplot", "jitter")) + coord_cartesian(ylim=c(0,125))
+
+//#######   Admissions and IP Procedures   #######
+qplot(logIPDays, logORProcedures, data=hcclust, geom=c("point", "jitter"))
+qplot(logHospitalAdmissions, logORProcedures, data=hcclust, geom=c("point", "jitter"))
+qplot(Total.Admissions, ip_sgy, data=highcost, geom=c("point", "jitter"))
+
+//=================================   Clustering   =======================================================================================================================================================================================================================================
+hcdist<-as.matrix(daisy(hcclust)) #'Distance matrix'
+varsOfInterest<-c(3,6,7,8,9,10,11,14,15) #'Indices of untransformed versions of the variables we're using'
+hcPCA<-princomp(hcclust) //#######   PCA for plotting clusters   #######
+hcPCA$loadings
+pcascores<-data.frame(hcPCA$scores)
+
+//#######   Ward's Agglomerative Hierarchical Clustering   #######
+hcAgn <- agnes(hcclust, metric = "euclidean", method="ward", stand = FALSE)
+plot(hcAgn, nmax = 150, which=1)
+plot(hcAgn, nmax = 150, which=2)
+
+//#######   (Checking Work For Initial Medoid calculation) #######
+ward3 <- cutree(hcAgn, k = 3)
+minClustDist(ward3==1,hcdist)
+minClustDist(ward3==2,hcdist)
+minClustDist(ward3==3,hcdist)
+(clustDists1<-sapply(which(ward3==1),function(i) clustDist(i,ward3==1,hcdist)))
+which(ward3==1)[which.min(clustDists1)]
+(clustDists1<-sapply(which(ward3==2),function(i) clustDist(i,ward3==2,hcdist)))
+(clustDists2<-sapply(which(ward3==2),function(i) clustDist(i,ward3==2,hcdist)))
+(clustDists3<-sapply(which(ward3==3),function(i) clustDist(i,ward3==3,hcdist)))
+
+//#######   We've got initial medoids, now run k-medoids   #######
+initialMedoids<-as.vector(c(minClustDist(ward3==1,hcdist),minClustDist(ward3==2,hcdist),minClustDist(ward3==3,hcdist)))
+hcPAM<-pam(hcclust, k=3, medoids=initialMedoids, stand=FALSE)
+
+xtabs(~cutree(hcAgn, k = 3) + hcPAM$clustering) #'Compare results of k-mediods and Ward's'
+myHist(hcPAM$clustering == 1,varsOfInterest) #'print out histograms for each cluster'
+myHist(hcPAM$clustering == 2,varsOfInterest)
+myHist(hcPAM$clustering == 3,varsOfInterest)
+
+//=================================   3d PCA plot   =======================================================================================================================================================================================================================================
+library(pca3d)
+pca3d(hcPCA,col=cutree(hcAgn, k = 2), show.labels=TRUE, labels.col=cutree(hcAgn, k = 2))
+pca3d(hcPCA,group=factor(cutree(hcAgn, k = 2)), show.labels=TRUE, show.centroids=TRUE)
+
+//=================================   Nice PCA/MDS plot from clustering library   =======================================================================================================================================================================================================================================
+clusplot(hcclust, hcPAM$cluster, color=TRUE, shade=TRUE, labels=2, lines=0)
+
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   Clustering 9/11/14   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+require(XLConnect)
+require(ggplot2)
+require(cluster)
+wb = loadWorkbook("H:\\My Documents\\High Cost\\New Decile for Cluster.xlsx")
+highcost<-readWorksheet(wb, sheet = 1,endRow=1487)
+highcost$IPCost<-highcost$Total * highcost$Inpt.pct
+highcost$OPCost<-highcost$Total * highcost$Outpt.pct
+
+head(highcost)
+tail(highcost)
+
+//#######   log transorm and range-standardize   #######
+logstandardized<-data.frame(
+    logIPCost=log(highcost$IPCost + 1),
+    logOPCost=log(highcost$OPCost + 1),
+    logIPDays=log(highcost$Total.Inpatient.Days + 1),
+    logHospitalAdmissions=log(highcost$Total.Admissions + 1),
+    logICUDays=log(highcost$ICU.Days + 1),
+    PCPVisits=highcost$Total.PCP.visits,
+    specialistVists=highcost$Total.Specialist.Visits,
+    ancillaryVists=highcost$Total.Ancillary.Visits,
+    logEDVists=log(highcost$Total.ED.visits + 1),
+    logIPProcedures=log(highcost$IP_Procedures + 1))
+myHist(logstandardized,1:nrow(logstandardized),1:10)
+hcclust<-data.frame(apply(logstandardized,2,rangeStandardize))
+
+//#######   Explore the data for clustering   #######
+sapply(hcclust, function(x) {sum(as.numeric(is.na(x))) }) #'Check for missing data'
+heatmap(cor(hcclust),symm=TRUE)
+cor(hcclust)
+
+//=================================   Ward's and K-medoids Clustering   =======================================================================================================================================================================================================================================
+hcdist<-as.matrix(daisy(hcclust)) #'Distance matrix'
+varsOfInterest<-c(6,7,8,9,10,11,12,14,15,16) #'Indices of untransformed versions of the variables we're using'
+hcPCA <- princomp(hcclust) #######   PCA for plotting clusters   #######
+hcPCA$loadings
+pcascores <- data.frame(hcPCA$scores)
+
+#######   Ward's Agglomerative Hierarchical Clustering   #######
+hcAgn <- agnes(hcdist, diss=TRUE,metric = "euclidean", method="ward", stand = FALSE)
+hcPCA$loadings
+plot(hcAgn, nmax = 150, which=2)
+pltree(hcAgn, main="Ward's Hierarchical Clustering of High Cost Patients",labels=rep(NA,nrow(hcclust)))
+
+#Plot a heatmap of data frame with Ward's clustering'
+png(file="H:\\My Documents\\high_cost_heatmap.png",width=3000,height=1000)
+col_breaks = c(seq(-1.7,-0.7,length=100),  # for red
+              seq(-0.7,0.7,length=100),              # for yellow
+              seq(0.7,1.7,length=100))              # for green
+mh<-myHeatmap(hcclust, clustmethod='ward',col_breaks=col_breaks)
+dev.off()
+
+# k=5 from Ward's clustering looks promising
+ward5 <- cutree(hcAgn, k=5)
+hist(ward5)
+pca3d(hcPCA,group=factor(ward5), show.labels=TRUE)
+
+//#######   We've got initial medoids, now run k-medoids   #######
+initialMedoids<-as.vector(c(minClustDist(ward5==1,hcdist),minClustDist(ward5==2,hcdist),minClustDist(ward5==3,hcdist),minClustDist(ward5==4,hcdist),minClustDist(ward5==5,hcdist)))
+hcPAM<-pam(hcclust, k=5, medoids=initialMedoids, stand=FALSE)
+xtabs(~ward5 + optimalRelabelling(hcPAM$clustering, ward5, function(x,y) sum(x==y)))
+
+//=================================   Examining Clustering Results   =======================================================================================================================================================================================================================================
+#Get the clustering from our run-the-full-procedure function
+clResults <- myClustering(logstandardized, c(), 5, summaryStats=FALSE)
+
+//#######   Plotting Results   #######
+pca3d(hcPCA,group=factor(clResults$pam), show.labels=TRUE)
+
+#Ward's PCA
+png(file="H:\\My Documents\\wards_pca_plot.png",width=1200,height=1000,res=150)
+cbbPalette <- c("#E69F00", "#CC79A7", "#0072B2", "#D55E00","#009E73","#F0E442")
+science_theme <- theme(panel.grid.major=element_line(size=0.5, color="grey"), axis.line=element_line(size=0.7, color="black"), legend.position=c(0.85,0.85))
+p3<-qplot(Comp.1, Comp.2, data=pcascores, geom=c("point"), color=factor(clResults$wards))
+(p3 <- p3 +scale_colour_manual(name="Cluster",values=cbbPalette) +science_theme +theme_bw() +xlab('PC1') +ylab('PC2') +ggtitle("Ward's Clustering of High Cost Patients\n PCA Plot"))
+dev.off()
+
+#K-medoids PCA
+png(file="H:\\My Documents\\kmedoids_final_pca_plot.png",width=1200,height=1000,res=150)
+cbbPalette <- c("#E69F00", "#CC79A7", "#0072B2", "#D55E00","#009E73","#F0E442")
+science_theme <- theme(panel.grid.major=element_line(size=0.5, color="grey"), axis.line=element_line(size=0.7, color="black"), legend.position=c(0.85,0.85))
+p3<-qplot(Comp.1, Comp.2, data=pcascores, geom=c("point"), color=factor(clResults$pam))
+(p3 <- p3 +scale_colour_manual(name="Cluster",values=cbbPalette) +science_theme +theme_bw() +xlab('PC1') +ylab('PC2') +ggtitle("K-medoids Clustering of High Cost Patients\n PCA Plot"))
+dev.off()
+
+#K-medoids Kruskal-Shepard (least squares) MDS
+#RMK: cmdscale MDS (classical scaling) gives same result as PCA, and sammon (weighted least squares) converges after 0 iterations and so gives same answer as cmdscale.
+library(MASS)
+hc.mds <- isoMDS(hcdist)
+hc.mds <- data.frame(Dimension1=-hc.mds$points[,1], Dimension2=hc.mds$points[,2])
+png(file="H:\\My Documents\\kmedoids_final_mds_plot.png",width=1200,height=1000,res=150)
+cbbPalette <- c("#E69F00", "#CC79A7", "#0072B2", "#D55E00","#009E73","#F0E442")
+science_theme <- theme(panel.grid.major=element_line(size=0.5, color="grey"), axis.line=element_line(size=0.7, color="black"), legend.position=c(0.85,0.85))
+p3<-qplot(Dimension1, Dimension2, data=hc.mds, geom=c("point"), color=factor(clResults$pam))
+(p3 <- p3 +scale_colour_manual(name="Cluster",values=cbbPalette) +science_theme +theme_bw() +ggtitle("K-medoids Clustering of High Cost Patients\n MDS Plot"))
+dev.off()
+
+
+#Grid Plot of Wards vs. K-medoids
+library(grid)
+library(gridExtra)
+p1<-qplot(Comp.1, Comp.2, data=pcascores, geom=c("point"), color=factor(ward5))
+p2<-qplot(Comp.3, Comp.2, data=pcascores, geom=c("point"), color=factor(ward5))
+(p3<-qplot(Comp.1, Comp.2, data=pcascores, geom=c("point"), color=factor(hcPAM$clustering2)) +scale_colour_manual(values=cbbPalette))
+p4<-qplot(Comp.3, Comp.2, data=pcascores, geom=c("point"), color=factor(hcPAM$clustering2))
+grid.arrange(p1, p2,p3,p4,nrow=2)
+
+//#######   Median values Per Cluster  #######
+myClustering(logstandardized, highcost, 5)
+                        [,1]                 [,2]                 [,3]                 [,4]                 [,5]                
+Total.Admissions        Median : 0.0        Median : 1.000     Median : 2.000     Median : 2.000     Median : 1.000    
+Total.Inpatient.Days    Median : 0.0        Median : 4.802     Median :19.413     Median :11.776     Median : 5.842    
+ICU.Days                Median : 0.0        Median : 0.000     Median : 4.027     Median : 0.000     Median : 0.000    
+IP_Procedures           Median : 0.0        Median : 0.000     Median : 0.000     Median : 0.000     Median : 2.00      
+Total.ED.visits         Median : 0.0        Median : 1.000     Median : 2.000     Median : 3.000     Median : 0.000   
+Total.PCP.visits        Median : 2.0        Median : 3.000     Median : 2.000     Median : 3.000     Median : 2.00     
+Total.Specialist.Visits Median :14.0        Median : 11.00     Median :10.00      Median :13.00      Median : 9.00     
+Total.Ancillary.Visits  Median :10.0        Median : 9.0       Median : 9.00      Median :13.00      Median :12.00     
+IPCost                  Median : $0         Median : $12,611   Median : $48,019   Median : $22,453   Median : $27,851    
+OPCost                  Median : $30,266    Median : $15,794   Median : $12,106   Median : $16,564   Median : $10,645  
+
+//#######  Final  Medoids produced after k-medoids iteration    #######
+initialMedoids<-as.vector(c(minClustDist(hcPAM$clustering2==1,hcdist),minClustDist(hcPAM$clustering2==2,hcdist),minClustDist(hcPAM$clustering2==3,hcdist),minClustDist(hcPAM$clustering2==4,hcdist),minClustDist(hcPAM$clustering2==5,hcdist)))
+> t(hcclust[initialMedoids,])
+
+Cluster                        1          2          3          4          5
+Rank                         540        335       1104        686        577
+logHospitalAdmissions 0.00000000 0.22106473 0.35037931 0.35037931 0.22106473
+logIPDays             0.00000000 0.31424015 0.56362849 0.46016119 0.33752781
+logICUDays            0.00000000 0.00000000 0.38910688 0.00000000 0.00000000
+logIPProcedures       0.00000000 0.00000000 0.00000000 0.00000000 0.52832083
+logEDVists            0.00000000 0.21810429 0.34568712 0.43620858 0.00000000
+PCPVisits             0.05405405 0.08108108 0.08108108 0.10810811 0.08108108
+specialistVists       0.13392857 0.12500000 0.04464286 0.16964286 0.08035714
+ancillaryVists        0.06190476 0.02857143 0.04761905 0.07142857 0.07142857
+logIPCost             0.00000000 0.67233577 0.79124807 0.70778931 0.72290385
+logOPCost             0.66141670 0.57557795 0.48628220 0.60019254 0.52902822
+
+//=================================   Bootstrap Resampling validity statistics   =======================================================================================================================================================================================================================================
+k<-5
+Nruns <- 1000
+N<-nrow(logstandardized)
+referenceClustering <- myClustering(logstandardized, c(), k, summaryStats=FALSE)
+
+reps <- c()
+for (i in 1:Nruns){
+    bootSample <- sample.int(N, size=N, replace=TRUE)
+    bootClustering <- myClustering(logstandardized[bootSample,], c(), k, summaryStats=FALSE)
+    bootRelabelled <- optimalMatching(bootClustering$pam, referenceClustering$pam[bootSample], function(x,y) sum(x==y))
+    concordances <- rep(NA,N)
+    concordances[bootSample] <- bootRelabelled == referenceClustering$pam[bootSample]
+    reps<-cbind(reps, concordances)
+}
+meanConcordances <- rowSums(reps, na.rm=TRUE) / apply(reps,1,function(x) Nruns-sum(as.numeric(is.na(x))))
+
+tapply(meanConcordances, referenceClustering$pam, mean, na.rm=TRUE)
+#Bootstrapped validity results per-cluster with Nruns=1000 , LAST TIME WE ARE DOING THIS!!
+        1         2         3         4         5 
+0.9956932 0.8609176 0.7539875 0.7522009 0.8943816 
+
+mean(meanConcordances)
+#Grand mean validity:
+0.8728858
+
+#//#######   Add validity stats to clustering results and print out the results for each patient  #######
+referenceClustering$bootValidity1000<- meanConcordances
+referenceClustering$wards <-optimalMatching(referenceClustering$wards, referenceClustering$pam, function(x,y) sum(x==y))
+write.table(referenceClustering,'H:\\My Documents\\High Cost Clustering Results.csv',sep=",")
+
+#Confusion matrix for results of Ward's and K-medoids
+>  xtabs(~wards +pam,referenceClustering)
+     pam
+wards   1   2   3   4   5
+    1 415   0   0   0   0
+    2   0 253   0  25  16
+    3   0  28 146  17   2
+    4   0  37   2 187   1
+    5   0  11  16  52 278
+
+    I am a volunteeer working with Jacklie Matthews and Jenny Sohn on validating CMS readmissions for all hospitals.
+
+//=================================   Cross-Validation validity test   =======================================================================================================================================================================================================================================
+# The dataset is repeatedly split in half and clustering is run independently on each half.
+# Then, halves A and B are used to predict the clustering in the other half, using closest medoid prediction (i.e. Step 2 in k-medoids).
+# Validity is computed as the mean of A->B and B->A prediction accuracy.
+
+k<-5
+Nruns <- 1000
+halfN <- floor(nrow(logstandardized)/2) #Discard last record if odd number.
+hcdist<-as.matrix(daisy(data.frame(apply(logstandardized,2,rangeStandardize))))
+reps <- c()
+for (i in 1:Nruns){
+    sampleA <- sample.int(2*halfN, size=halfN, replace=FALSE)
+    sampleB <- (1:(2*halfN))[-sampleA]
+    pamA <- myClustering(logstandardized[sampleA,], c(), k, summaryStats=FALSE)$pam
+    pamB <- myClustering(logstandardized[sampleB,], c(), k, summaryStats=FALSE)$pam
+    distsA <- as.matrix(daisy(data.frame(apply(logstandardized[sampleA,],2,rangeStandardize))))
+    distsB <- as.matrix(daisy(data.frame(apply(logstandardized[sampleB,],2,rangeStandardize))))
+    medoidsA <- as.vector(c(minClustDist(pamA==1,distsA),minClustDist(pamA==2,distsA),minClustDist(pamA==3,distsA),minClustDist(pamA==4,distsA),minClustDist(pamA==5,distsA)))
+    medoidsB <- as.vector(c(minClustDist(pamB==1,distsB),minClustDist(pamB==2,distsB),minClustDist(pamB==3,distsB),minClustDist(pamB==4,distsB),minClustDist(pamB==5,distsB)))
+
+    classify_by_closest_medoid_f <- function(i,medoid_idxs) which.min(hcdist[medoid_idxs,i])
+    class_BA <- sapply(sampleA, classify_by_closest_medoid_f, sampleB[medoidsB])
+    class_AB <- sapply(sampleB, classify_by_closest_medoid_f, sampleA[medoidsA])
+    calculate_concordances <- function(pamA_perm) {
+        concordances <- rep(NA,N)
+        concordances[sampleA] <- class_BA==pamA_perm
+        concordances[sampleB] <- class_AB==permute(pamB,order(unique(pamA_perm))) #order is the inverse permutation
+        concordances
+    }
+    pamA_perm <- optimalMatching(pamA, pamB, function(pamA_perm,Y) sum(calculate_concordances(pamA_perm),na.rm=TRUE) )
+    reps<-cbind(reps,calculate_concordances(pamA_perm))
+}
+meanConcordances <- rowSums(reps, na.rm=TRUE) / apply(reps,1,function(x) Nruns-sum(as.numeric(is.na(x))))
+
+#Cross-validated mean/standard deviation stability per-cluster with Nruns=1000.
+tapply(meanConcordances, referenceClustering$pam, mean, na.rm=TRUE)
+        1         2         3         4         5 
+0.9879277 0.7620274 0.5776402 0.6155231 0.8263401
+tapply(meanConcordances, referenceClustering$pam, sd, na.rm=TRUE)
+         1          2          3          4          5 
+0.01852168 0.15219200 0.16218742 0.15412504 0.21218245 
+
+mean(meanConcordances)
+#Grand mean validity mean/standard deviation stability:
+0.7899159
+sd(apply(reps,2,mean))
+0.07260623
+
+#standard deviation of grand mean validity estimate (averaged across 1000 runs).
+sd(apply(reps,2,mean))/sqrt(Nruns)
+0.00229601
+
+referenceClustering$cvValidity1000<- meanConcordances
+referenceClustering$wards <-optimalMatching(referenceClustering$wards, referenceClustering$pam, function(x,y) sum(x==y))
+write.table(referenceClustering,'H:\\My Documents\\High Cost Clustering Results CV.csv',sep=",")
+
+//=================================   Cross-Validation using kNN as supervised learner (DON'T USE - KEPT AS REFERENCE)  =======================================================================================================================================================================================================================================
+//#######   Cross-validation cluster validity   #######
+#First, determine the best k to use for kNN.
+library(class)
+Nruns <- 200
+halfN <- floor(nrow(logstandardized)/2)
+hcclust<-data.frame(apply(logstandardized,2,rangeStandardize))
+reps <- c()
+for (i in 1:Nruns){
+    sampleA <- sample.int(2*halfN, size=halfN, replace=FALSE)
+    pamA <- myClustering(logstandardized[sampleA,], c(), k, summaryStats=FALSE)$pam
+    reps<-cbind(reps, sapply(1:20,function(m) sum(knn.cv(hcclust[sampleA,], pamA, k=m)==pamA)))
+}
+rowMeans(reps)/halfN
+plot(1:20,rowMeans(reps)/halfN)
+#k=7 seems best, giving 5.9% test error according to leave-one-out cross-validation. Even values of k consistently underperform.
+
+#Run validity test matching independently clustered halves of the data. Clustering boundaries are defined by kNN.
+k<-5
+kNNk <-7 #Best k for kNN determined above.
+maxkNNk <- 12
+Nruns <- 200
+N<-nrow(logstandardized)
+halfN <- floor(nrow(logstandardized)/2) #Discard last record if odd number.
+hcclust<-data.frame(apply(logstandardized,2,rangeStandardize))
+reps <- c()
+for (i in 1:Nruns){
+    sampleA <- sample.int(2*halfN, size=halfN, replace=FALSE)
+    sampleB <- (1:(2*halfN))[-sampleA]
+    pamA <- myClustering(logstandardized[sampleA,], c(), k, summaryStats=FALSE)$pam
+    pamB <- myClustering(logstandardized[sampleB,], c(), k, summaryStats=FALSE)$pam
+    
+    knnAB <- knn(hcclust[sampleA,], hcclust[sampleB,], pamA, k=kNNk)
+    knnBA <- knn(hcclust[sampleB,], hcclust[sampleA,], pamB, k=kNNk)
+    knn_test_score_f <- function(pamA_perm,pamB) sum(permute(knnAB,unique(pamA_perm))==pamB) +sum(pamA_perm==knnBA)
+    pamA_perm <- optimalMatching(pamA, pamB, knn_test_score_f)
+    concordances <- rep(NA,N)
+    concordances[sampleA] <- knn(hcclust[sampleB,], hcclust[sampleA,], pamB, k=kNNk)==pamA_perm
+    concordances[sampleB] <- knn(hcclust[sampleA,], hcclust[sampleB,], pamA_perm, k=kNNk)==pamB
+    reps<-cbind(reps,concordances)
+}
+meanConcordances <- rowSums(reps, na.rm=TRUE) / apply(reps,1,function(x) Nruns-sum(as.numeric(is.na(x))))
+
+
